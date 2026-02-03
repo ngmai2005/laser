@@ -102,7 +102,8 @@
         function setupRound() {
           const base = performance.now();
           roundStart = base;
-
+          
+          // targets = []; 
           activeTargets = [];
 
           const SIZE = 500;
@@ -198,13 +199,10 @@
             this.x = x;
             this.y = y;
             this.size = size;
-
-            // this.start = start;
-            // this.end = end;
             this.motion = motion;
+            this.start = 0;
+            this.end = 0;
             this.state = "WAITING";
-
-            
             this.hit = false;
           }
 
@@ -277,7 +275,7 @@
           if (audioUnlocked) {
             hitSound.pause();
             hitSound.currentTime = 0;
-            hitSound.play().catch(() => {});
+            hitSound.play;
           }
         }
 
@@ -432,7 +430,7 @@
           currentTargetIndex++;
 
           if (currentTargetIndex >= activeTargets.length) {
-            phase = 99; // hết round
+            // phase = 99; 
             return;
           }
 
@@ -449,14 +447,15 @@
 
             const onTarget =
               laserPos &&
-              target.hitTest(laserPos[0], laserPos[1]);
+              target.hitTest(laserPos[0], laserPos[1], performance.now());
+
 
             const fired = shotFired(onTarget);
 
             if (fired && onTarget) {
               target.hit = true;
               target.state = "DONE";  
-              target.active = false;
+              // target.active = false;
               score++;
 
               gotoNextTarget(performance.now());
@@ -467,8 +466,9 @@
 
         function loop() {
           const now = performance.now();
-          
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          ctx.fillStyle = "black";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
           for (const target of activeTargets) {
             target.update(now);
           }
@@ -502,31 +502,31 @@
           const current = activeTargets.find(tg => tg.state !== "DONE");
 
           // timeline
-          if (t < 15000) {
-            if (activeTargets[0].state !== "DONE")
-              activeTargets[0].state = "ACTIVE";
-          }
-          else if (t < 20000) {
-            if (activeTargets[1].state !== "DONE")
-              activeTargets[1].state = "ACTIVE";
-          }
-          else if (t < 30000) {
-            if (activeTargets[1].state !== "DONE")
-              activeTargets[1].state = "ACTIVE";
-            if (activeTargets[2].state !== "DONE")
-              activeTargets[2].state = "ACTIVE";
-          }
-          else if (t < 35000) {
-            if (activeTargets[2].state !== "DONE")
-              activeTargets[2].state = "ACTIVE";
-          }
-          else if (t < 50000) {
-            if (activeTargets[3].state !== "DONE")
-              activeTargets[3].state = "ACTIVE";
-          }
-          else {
-            phase = 99; // kết thúc round
-          }
+          // if (t < 15000) {
+          //   if (activeTargets[0].state !== "DONE")
+          //     activeTargets[0].state = "ACTIVE";
+          // }
+          // else if (t < 20000) {
+          //   if (activeTargets[1].state !== "DONE")
+          //     activeTargets[1].state = "ACTIVE";
+          // }
+          // else if (t < 30000) {
+          //   if (activeTargets[1].state !== "DONE")
+          //     activeTargets[1].state = "ACTIVE";
+          //   if (activeTargets[2].state !== "DONE")
+          //     activeTargets[2].state = "ACTIVE";
+          // }
+          // else if (t < 35000) {
+          //   if (activeTargets[2].state !== "DONE")
+          //     activeTargets[2].state = "ACTIVE";
+          // }
+          // else if (t < 50000) {
+          //   if (activeTargets[3].state !== "DONE")
+          //     activeTargets[3].state = "ACTIVE";
+          // }
+          // else {
+          //   phase = 99; // kết thúc round
+          // }
 
           // hết bia?
           const allDone = activeTargets.every(tg => tg.isDone());
