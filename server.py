@@ -10,24 +10,26 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # ================= CONFIG =================
 CAM_INDEX = 0
 FLIP_MODE = 1
-LASER_MIN_AREA = 1
-TEMPORAL_FRAMES = 3
+LASER_MIN_AREA = 3
+LASER_MAX_AREA = 160
+TEMPORAL_FRAMES = 4
 WIDTH, HEIGHT = 1280, 720
-LASER_HOLD_MS = 80
+LASER_HOLD_MS = 100
 
 # ================= CAMERA =================
 cap = cv2.VideoCapture(CAM_INDEX)
 cap.set(3, WIDTH)
 cap.set(4, HEIGHT)
 
-cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
-cap.set(cv2.CAP_PROP_EXPOSURE, -6)
+cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0)
+cap.set(cv2.CAP_PROP_EXPOSURE, -7)
 cap.set(cv2.CAP_PROP_GAIN, 0)
 
 
 latest_frame = None
 frame_lock = threading.Lock()
 running = True
+latest_mask = None
 
 # ================= DATA =================
 laser_buffer = []
@@ -56,7 +58,9 @@ threading.Thread(target=camera_loop, daemon=True).start()
 
 # ================= LASER LOOP =================
 def laser_loop():
-    global laser_pos, last_laser_time
+    global laser_pos, last_laser_time, laser_buffer, latest_mask
+
+    kernel = np.ones((2, 2), np.uint8)
 
     while running:
         with frame_lock:
@@ -69,38 +73,38 @@ def laser_loop():
         hsv = cv2.cvtColor(blur, cv2.COLOR_BGR2HSV)
         h, s, v = cv2.split(hsv)
 
-        # Hue đỏ – nới rộng cho camera lệch màu
-        red1 = cv2.inRange(hsv, (0, 80, 50), (15, 255, 255))
-        red2 = cv2.inRange(hsv, (165, 80, 50), (180, 255, 255))
-        mask = cv2.bitwise_or(red1, red2)
+        red1 = cv2.inRange(hsv, (0, 60, 160), (10, 255, 255))
+        red2 = cv2.inRange(hsv, (170, 60, 160), (180, 255, 255))
+        red_mask = cv2.bitwise_or(red1, red2)
 
-        # Chỉ giữ pixel đủ bão hòa (laser rất bão hòa)
-        sat_mask = cv2.inRange(s, 90, 255)
+        bright_mask = cv2.inRange(v, 200, 255)
+        sat_mask = cv2.inRange(s, 80, 255)
+
+        mask = cv2.bitwise_and(red_mask, bright_mask)
         mask = cv2.bitwise_and(mask, sat_mask)
 
-        # mask = cv2.bitwise_and(bright, sat)
-        # mask = cv2.bitwise_and(mask, red1 | red2)
-
-        kernel = np.ones((3,3), np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_DILATE, kernel)
+        mask = cv2.dilate(mask, kernel, iterations=1)
+
+        latest_mask = mask.copy()   # 👈 QUAN TRỌNG
 
         cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.imshow("laser mask", mask)
-        cv2.waitKey(1)
 
         pos = None
-        max_brightness = 0
+        best_score = 0
 
         for c in cnts:
             area = cv2.contourArea(c)
-            if 3 < area < 80:  
-                x, y, w, h = cv2.boundingRect(c)
-                brightness = v[y:y+h, x:x+w].mean()
+            if not (LASER_MIN_AREA <= area <= LASER_MAX_AREA):
+                continue
 
-                if brightness > max_brightness:
-                    max_brightness = brightness
-                    pos = (int(x + w//2), int(y + h//2))
+            x, y, w, h = cv2.boundingRect(c)
+            brightness = v[y:y+h, x:x+w].mean()
+            score = brightness / area
+
+            if score > best_score:
+                best_score = score
+                pos = (x + w // 2, y + h // 2)
 
         now = time.time() * 1000
 
@@ -109,18 +113,18 @@ def laser_loop():
             if len(laser_buffer) > TEMPORAL_FRAMES:
                 laser_buffer.pop(0)
 
-            avg_x = int(sum(p[0] for p in laser_buffer) / len(laser_buffer))
-            avg_y = int(sum(p[1] for p in laser_buffer) / len(laser_buffer))
-
-            laser_pos = [avg_x, avg_y]
+            laser_pos = [
+                int(sum(p[0] for p in laser_buffer) / len(laser_buffer)),
+                int(sum(p[1] for p in laser_buffer) / len(laser_buffer))
+            ]
             last_laser_time = now
-
         else:
             if now - last_laser_time > LASER_HOLD_MS:
                 laser_pos = None
                 laser_buffer.clear()
 
-        time.sleep(0.01)  # ~100Hz
+        time.sleep(0.01)
+
     if pos:
         print("🔴 laser:", pos, "area:", cv2.contourArea(c))
     else:
@@ -219,7 +223,15 @@ def release_camera():
 
 atexit.register(release_camera)
 
+def debug_window():
+    while running:
+        if latest_mask is not None:
+            cv2.imshow("LASER MASK", latest_mask)
+        if cv2.waitKey(1) & 0xFF == 27:
+            break
+    cv2.destroyAllWindows()
+
 # ================= RUN =================
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    threading.Thread(target=laser_loop, daemon=True).start()
+    debug_window()

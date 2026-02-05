@@ -1,339 +1,346 @@
-  <!doctype html>
-  <html lang="en">
-    <head>
-      <meta charset="UTF-8" />
-      <title>Laser Target Trainer</title>
-      <style>
-        @import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800&display=swap");
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Laser Target Trainer</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800&display=swap");
 
-        html,
-        body {
-          margin: 0;
-          padding: 0;
-          width: 100%;
-          height: 100%;
-          overflow: hidden;
-          background: radial-gradient(circle at center, #1a1a1a 0%, #050505 70%);
-          font-family: "Orbitron", Arial, sans-serif;
-        }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: radial-gradient(circle at center, #1a1a1a 0%, #050505 70%);
+        font-family: "Orbitron", Arial, sans-serif;
+      }
 
-        canvas {
-          display: block;
-          background:
-            radial-gradient(
-              circle at center,
-              rgba(255, 255, 255, 0.04),
-              rgba(0, 0, 0, 0.95)
-            ),
-            repeating-linear-gradient(
-              0deg,
-              rgba(255, 255, 255, 0.02) 0px,
-              rgba(255, 255, 255, 0.02) 1px,
-              transparent 2px,
-              transparent 4px
-            );
-        }
-      </style>
-    </head>
-    <body>
-      <canvas id="gameCanvas"></canvas>
-
-      <script>
-        const canvas = document.getElementById("gameCanvas");
-        const ctx = canvas.getContext("2d");
-        const CAM_W = 1280;
-        const CAM_H = 720;
-        const HOLD_TO_FIRE = 40;
-        let laserHoldStart = 0;
-        let audioUnlocked = false;
-        let assetsReady = false;
-        let loadedCount = 0;
-
-        // ===== FULLSCREEN RESIZE =====
-        // ===== SCALE FACTOR (LETTERBOX – FIX LỆCH BIA PHẢI) =====
-        function getScale() {
-          return Math.min(canvas.width / CAM_W, canvas.height / CAM_H);
-        }
-
-        function getOffsetX() {
-          const scale = getScale();
-          return (canvas.width - CAM_W * scale) / 2;
-        }
-
-        function getOffsetY() {
-          const scale = getScale();
-          return (canvas.height - CAM_H * scale) / 2;
-        }
-
-        function sx(x) {
-          return x * getScale() + getOffsetX();
-        }
-
-        function sy(y) {
-          return y * getScale() + getOffsetY();
-        }
-
-        function resizeCanvas() {
-          canvas.width = window.innerWidth;
-          canvas.height = window.innerHeight;
-        }
-
-        window.addEventListener("resize", resizeCanvas);
-        resizeCanvas();
-
-        // // ===== SCALE FACTOR =====
-        // function sx(x){ return x * canvas.width / CAM_W; }
-        // function sy(y){ return y * canvas.height / CAM_H; }
-
-        // ===== GAME CONFIG =====
-        const MAX_BULLETS = 16;
-        const SHOT_COOLDOWN = 120;
-        const TARGET_TIME = 15000;
-
-        function imageSize() {
-          let size = canvas.height * 0.55;
-
-          size = Math.max(480, size);
-          size = Math.min(820, size);
-
-          return Math.floor(size);
-        }
-
-        function setupRound() {
-          const base = performance.now();
-          roundStart = base;
-          
-          // targets = []; 
-          activeTargets = [];
-
-          const SIZE = 500;
-          const cy = CAM_H / 2 - SIZE / 2;
-          const cx = CAM_W / 2 - SIZE / 2;
-          const offsetX = SIZE * 0.8;
-
-          const t1 = new Target(targets[0], cx, cy, SIZE);
-          const t2 = new Target(targets[1], cx - offsetX, cy, SIZE);
-          const t3 = new Target(targets[2], cx + offsetX, cy, SIZE);
-
-          const t4 = new Target(
-            targets[3],
-            cx,
-            cy,
-            SIZE,
-            {
-              amp: 90,    
-              speed: 2.5  
-            }
+      canvas {
+        display: block;
+        background:
+          radial-gradient(
+            circle at center,
+            rgba(255, 255, 255, 0.04),
+            rgba(0, 0, 0, 0.95)
+          ),
+          repeating-linear-gradient(
+            0deg,
+            rgba(255, 255, 255, 0.02) 0px,
+            rgba(255, 255, 255, 0.02) 1px,
+            transparent 2px,
+            transparent 4px
           );
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="gameCanvas"></canvas>
 
-          const list = [t1, t2, t3, t4];
+    <script>
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d");
+      const CAM_W = 1280;
+      const CAM_H = 720;
+      const HOLD_TO_FIRE = 20;
+      const HIT_DELAY = 3000;
+      let laserHoldStart = 0;
+      let audioUnlocked = false;
+      let assetsReady = false;
+      let loadedCount = 0;
 
-          list.forEach(t => {
-            t.state = "WAITING";
-            t.hit = false;
-          });
+      // ===== FULLSCREEN RESIZE =====
+      function getScale() {
+        return Math.min(canvas.width / CAM_W, canvas.height / CAM_H);
+      }
 
-          currentTargetIndex = 0;
+      function getOffsetX() {
+        const scale = getScale();
+        return (canvas.width - CAM_W * scale) / 2;
+      }
 
-          // kích hoạt bia đầu
-          list[0].state = "ACTIVE";
-          list[0].start = base;
-          list[0].end = base + TARGET_TIME;
+      function getOffsetY() {
+        const scale = getScale();
+        return (canvas.height - CAM_H * scale) / 2;
+      }
 
-          activeTargets = list;
+      function sx(x) {
+        return x * getScale() + getOffsetX();
+      }
+
+      function sy(y) {
+        return y * getScale() + getOffsetY();
+      }
+
+      function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+
+      // // ===== SCALE FACTOR =====
+      // function sx(x){ return x * canvas.width / CAM_W; }
+      // function sy(y){ return y * canvas.height / CAM_H; }
+
+      // ===== GAME CONFIG =====
+      const MAX_BULLETS = 16;
+      const SHOT_COOLDOWN = 120;
+      const TARGET_TIME = 15000;
+
+      function imageSize() {
+        let size = canvas.height * 0.55;
+
+        size = Math.max(480, size);
+        size = Math.min(820, size);
+
+        return Math.floor(size);
+      }
+
+      function setupRound() {
+        const base = performance.now();
+        roundStart = base;
+
+        // targets = [];
+        activeTargets = [];
+
+        const SIZE = 500;
+        const cy = CAM_H / 2 - SIZE / 2;
+        const cx = CAM_W / 2 - SIZE / 2;
+        const offsetX = SIZE * 0.5;
+
+        const t1 = new Target(targets[0], cx, cy, SIZE);
+        const t2 = new Target(targets[1], cx - offsetX, cy, SIZE);
+        const t3 = new Target(targets[2], cx + offsetX, cy, SIZE);
+
+        const t4 = new Target(targets[3], cx, cy, SIZE, {
+          amp: 90,
+          speed: 2.5,
+        });
+
+        const list = [t1, t2, t3, t4];
+
+        list.forEach((t) => {
+          t.state = "WAITING";
+          t.hit = false;
+          t.start = Infinity;
+          t.end = Infinity;
+        });
+
+        currentTargetIndex = 0;
+
+        // kích hoạt bia đầu
+        list[0].state = "ACTIVE";
+        list[0].start = base;
+        list[0].end = base + TARGET_TIME;
+
+        activeTargets = list;
+      }
+
+      // function setupRound() {
+      //   const base = performance.now();
+      //   roundStart = base;
+      //   activeTargets = [];
+
+      //   const SIZE = 500;
+      //   const cy = CAM_H / 2 - SIZE / 2;
+      //   const cx = CAM_W / 2 - SIZE / 2;
+      //   const offsetX = SIZE * 0.6;
+
+      //   const t1 = new Target(targets[0], cx, cy, SIZE);           // bia 1
+      //   const t2 = new Target(targets[1], cx - offsetX, cy, SIZE); // bia 2
+      //   const t3 = new Target(targets[2], cx + offsetX, cy, SIZE); // bia 3
+      //   const t4 = new Target(targets[3], cx, cy, SIZE);           // bia 4
+
+      //   // ===== FIX TIMELINE (ms) =====
+      //   t1.start = base + 0;
+      //   t1.end   = base + 15000;
+
+      //   t2.start = base + 15000;
+      //   t2.end   = base + 30000;
+
+      //   t3.start = base + 20000;
+      //   t3.end   = base + 35000;
+
+      //   t4.start = base + 35000;
+      //   t4.end   = base + 50000;
+
+      //   activeTargets.push(t1, t2, t3, t4);
+      // }
+
+      // ===== STATE =====
+      let roundStart = performance.now();
+      let activeTargets = [];
+      let score = 0;
+      let bullets = 0;
+      let phase = 0;
+      let lastShot = 0;
+      let round = 1,
+        MAX_ROUND = 1;
+      let ttsPlayed = false;
+      let laserPrev = false;
+      let lastLaserOn = false;
+      let hitEffect = null;
+      let shotThisFrame = false;
+      let laserWasSeenLastFrame = false;
+      let firedThisHold = false;
+      let currentTargetIndex = 0;
+
+      class Target {
+        constructor(img, x, y, size, motion = null) {
+          this.img = img;
+          this.x = x;
+          this.y = y;
+          this.size = size;
+          this.motion = motion;
+          this.start = 0;
+          this.end = 0;
+          this.state = "WAITING";
+          this.hit = false;
         }
 
-        // function setupRound() {
-        //   const base = performance.now();
-        //   roundStart = base;
-        //   activeTargets = [];
-
-        //   const SIZE = 500;
-        //   const cy = CAM_H / 2 - SIZE / 2;
-        //   const cx = CAM_W / 2 - SIZE / 2;
-        //   const offsetX = SIZE * 0.6;
-
-        //   const t1 = new Target(targets[0], cx, cy, SIZE);           // bia 1
-        //   const t2 = new Target(targets[1], cx - offsetX, cy, SIZE); // bia 2
-        //   const t3 = new Target(targets[2], cx + offsetX, cy, SIZE); // bia 3
-        //   const t4 = new Target(targets[3], cx, cy, SIZE);           // bia 4
-
-        //   // ===== FIX TIMELINE (ms) =====
-        //   t1.start = base + 0;
-        //   t1.end   = base + 15000;
-
-        //   t2.start = base + 15000;
-        //   t2.end   = base + 30000;
-
-        //   t3.start = base + 20000;
-        //   t3.end   = base + 35000;
-
-        //   t4.start = base + 35000;
-        //   t4.end   = base + 50000;
-
-        //   activeTargets.push(t1, t2, t3, t4);
-        // }
-
-        // ===== STATE =====
-        let roundStart = performance.now();
-        let activeTargets = [];
-        let score = 0;
-        let bullets = 0;
-        let phase = 0;
-        let lastShot = 0;
-        let round = 1,
-          MAX_ROUND = 2;
-        let ttsPlayed = false;
-        let laserPrev = false;
-        let lastLaserOn = false;
-        let hitEffect = null;
-        let shotThisFrame = false;
-        let laserWasSeenLastFrame = false;
-        let firedThisHold = false;
-        let currentTargetIndex = 0;
-
-
-        class Target {
-          constructor(img, x, y, size, motion = null) {
-            this.img = img;
-            this.x = x;
-            this.y = y;
-            this.size = size;
-            this.motion = motion;
-            this.start = 0;
-            this.end = 0;
-            this.state = "WAITING";
-            this.hit = false;
+        update(now) {
+          if (this.state === "WAITING" && now >= this.start) {
+            this.state = "ACTIVE";
           }
 
-          update(now) {
-            if (this.state === "WAITING" && now >= this.start) {
-              this.state = "ACTIVE";
+          if (this.state === "ACTIVE" && now >= this.end) {
+            this.state = "DONE";
+
+            if (!this.hit) {
+              gotoNextTarget(now);
             }
-            if (this.state === "ACTIVE" && now >= this.end) {
-              this.state = "DONE";
-            }
-          }
-
-          isActive() {
-            return this.state === "ACTIVE";
-          }
-
-          isDone() {
-            return this.state === "DONE";
-          }
-
-          getOffset(now) {
-            if (!this.motion) return { dx: 0, dy: 0 };
-
-            const t = now / 1000;
-            const { amp = 60, speed = 2 } = this.motion;
-
-            return {
-              dx: Math.sin(t * speed) * amp,
-              dy: 0, // chỉ lắc ngang
-            };
-          }
-
-          hitTest(lx, ly, now) {
-            const { dx, dy } = this.getOffset(now);
-
-            const x = sx(this.x + dx);
-            const y = sy(this.y + dy);
-            const s = this.size * getScale();
-
-            return lx >= x && lx <= x + s && ly >= y && ly <= y + s;
           }
         }
 
-        // ===== LOAD TARGETS =====
-        const targets = [];
-        const TOTAL_TARGETS = 4;
+        isActive() {
+          return this.state === "ACTIVE";
+        }
 
-        for (let i = 1; i <= 4; i++) {
-          const img = new Image();
-          img.src = `/static/images/target${i}.png`;
-          img.onload = () => {
-            loadedCount++;
-            if (loadedCount === TOTAL_TARGETS) {
-              assetsReady = true;
-              console.log("✅ All targets loaded");
-            }
+        isDone() {
+          return this.state === "DONE";
+        }
+
+        getOffset(now) {
+          if (!this.motion) return { dx: 0, dy: 0 };
+
+          const t = now / 1000;
+          const { amp = 60, speed = 2 } = this.motion;
+
+          return {
+            dx: Math.sin(t * speed) * amp,
+            dy: 0,
           };
-
-          img.onerror = () => {
-            console.error("❌ Failed load target", img.src);
-          };
-          targets.push(img);
         }
 
-        // ===== LOAD SOUNDS =====
-        function fireTimeoutShot() {
-          // bullets++;
-          lastShot = performance.now();
+        hitTest(lx, ly, now) {
+          const { dx, dy } = this.getOffset(now);
 
-          if (audioUnlocked) {
-            hitSound.pause();
-            hitSound.currentTime = 0;
-            hitSound.play;
+          const x = sx(this.x + dx);
+          const y = sy(this.y + dy);
+          const s = this.size * getScale();
+
+          const margin = s * 0.07; 
+
+          return (
+            lx >= x - margin &&
+            lx <= x + s + margin &&
+            ly >= y - margin &&
+            ly <= y + s + margin
+          );
+        }
+      }
+
+      // ===== LOAD TARGETS =====
+      const targets = [];
+      const TOTAL_TARGETS = 4;
+
+      for (let i = 1; i <= 4; i++) {
+        const img = new Image();
+        img.src = `/static/images/target${i}.png`;
+        img.onload = () => {
+          loadedCount++;
+          if (loadedCount === TOTAL_TARGETS) {
+            assetsReady = true;
+            console.log("✅ All targets loaded");
           }
-        }
-
-        function loadSound(path) {
-          const a = new Audio(path);
-          a.preload = "auto";
-
-          a.addEventListener("error", () => {
-            console.error("❌ Audio load failed:", path);
-          });
-
-          a.addEventListener("canplaythrough", () => {
-            console.log("✅ Audio loaded:", path);
-          });
-
-          return a;
-        }
-
-        const fireSound = loadSound("/static/sounds/hit.mp3");
-        const hitSound = loadSound("/static/sounds/fire.mp3");
-
-        const resultSounds = {
-          GIOI: loadSound("/static/sounds/result_gioi.mp3"),
-          KHA: loadSound("/static/sounds/result_kha.mp3"),
-          DAT: loadSound("/static/sounds/result_dat.mp3"),
-          "KHONG DAT": loadSound("/static/sounds/result_khong_dat.mp3"),
         };
 
-        function unlockAudio() {
-          if (audioUnlocked) return;
+        img.onerror = () => {
+          console.error("❌ Failed load target", img.src);
+        };
+        targets.push(img);
+      }
 
-          const silent = new Audio();
-          silent.src = "/static/sounds/hit.mp3";
-          silent.volume = 0;
-          silent
-            .play()
-            .then(() => {
-              audioUnlocked = true;
-              console.log("Audio unlocked");
-            })
-            .catch(() => {});
+      // ===== LOAD SOUNDS =====
+      function fireTimeoutShot() {
+        // bullets++;
+        lastShot = performance.now();
+
+        if (audioUnlocked) {
+          hitSound.pause();
+          hitSound.currentTime = 0;
+          hitSound.play;
         }
-        document.addEventListener("keydown", unlockAudio, { once: true });
-        document.addEventListener("mousedown", unlockAudio, { once: true });
+      }
 
-        // ===== LASER FETCH =====
-        let laserPos = null;
-        let laserNow = false;
-        let laserSeen = false;
-        let laserSeenTime = 0;
-        let laserJustAppeared = false;
+      function loadSound(path) {
+        const a = new Audio(path);
+        a.preload = "auto";
 
-        async function fetchLaser() {
-          try {
-            const r = await fetch("/laser");
-            const d = await r.json();
+        a.addEventListener("error", () => {
+          console.error("❌ Audio load failed:", path);
+        });
 
-            if (d.x !== null) {
+        a.addEventListener("canplaythrough", () => {
+          console.log("✅ Audio loaded:", path);
+        });
+
+        return a;
+      }
+
+      const fireSound = loadSound("/static/sounds/hit.mp3");
+      const hitSound = loadSound("/static/sounds/fire.mp3");
+
+      const resultSounds = {
+        GIOI: loadSound("/static/sounds/result_gioi.mp3"),
+        KHA: loadSound("/static/sounds/result_kha.mp3"),
+        DAT: loadSound("/static/sounds/result_dat.mp3"),
+        "KHONG DAT": loadSound("/static/sounds/result_khong_dat.mp3"),
+      };
+
+      function unlockAudio() {
+        if (audioUnlocked) return;
+
+        const silent = new Audio();
+        silent.src = "/static/sounds/hit.mp3";
+        silent.volume = 0;
+        silent
+          .play()
+          .then(() => {
+            audioUnlocked = true;
+            console.log("Audio unlocked");
+          })
+          .catch(() => {});
+      }
+      document.addEventListener("keydown", unlockAudio, { once: true });
+      document.addEventListener("mousedown", unlockAudio, { once: true });
+
+      // ===== LASER FETCH =====
+      let laserPos = null;
+      let laserNow = false;
+      let laserSeen = false;
+      let laserSeenTime = 0;
+      let laserJustAppeared = false;
+
+      async function fetchLaser() {
+        try {
+          const r = await fetch("/laser");
+          const d = await r.json();
+
+          if (d.x !== null) {
             if (!laserSeen) {
               laserJustAppeared = true;
               laserHoldStart = performance.now();
@@ -350,379 +357,378 @@
             laserPos = null;
           }
 
-            laserNow = laserSeen;
-          } catch {
-            laserSeen = false;
-            laserNow = false;
-            laserPos = null;
-          }
+          laserNow = laserSeen;
+        } catch {
+          laserSeen = false;
+          laserNow = false;
+          laserPos = null;
         }
-        setInterval(fetchLaser, 16);
+      }
+      setInterval(fetchLaser, 16);
 
-        function checkHit(tx, ty, size) {
-          if (!laserPos) return false;
+      function checkHit(tx, ty, size) {
+        if (!laserPos) return false;
 
-          const lx = sx(laserPos[0]);
-          const ly = sy(laserPos[1]);
+        const lx = sx(laserPos[0]);
+        const ly = sy(laserPos[1]);
 
-          const margin = size * 0.08;
+        const margin = size * 0.08;
 
-          return lx >= tx && lx <= tx + size && ly >= ty && ly <= ty + size;
+        return lx >= tx && lx <= tx + size && ly >= ty && ly <= ty + size;
+      }
+
+      function fireShot() {
+        bullets++;
+        lastShot = Date.now();
+
+        if (audioUnlocked) {
+          hitSound.pause();
+          hitSound.currentTime = 0;
+          hitSound.play().catch(() => {});
         }
-
-        function fireShot() {
-          bullets++;
-          lastShot = Date.now();
-
-          if (audioUnlocked) {
-            hitSound.pause();
-            hitSound.currentTime = 0;
-            hitSound.play().catch(() => {});
-          }
-        }
-        // ===== MAIN LOOP =====
-        function shotFired(onTarget) {
-          if (!laserSeen) {
-            laserHoldStart = 0;
-            laserWasSeenLastFrame = false;
-            return false;
-          }
-
-          const now = performance.now();
-
-          if (!laserSeen) {
-            laserHoldStart = 0;
-            laserWasSeenLastFrame = false;
-            firedThisHold = false;
-            return false;
-          }
-
-          if (!laserWasSeenLastFrame) {
-            laserHoldStart = now;
-            laserWasSeenLastFrame = true;
-            firedThisHold = false;
-            return false;
-          }
-
-          if (!onTarget) {
-            laserHoldStart = now;   // reset giữ
-            firedThisHold = false;
-            return false;
-          }
-
-          if (
-            !firedThisHold &&
-            now - laserHoldStart >= HOLD_TO_FIRE &&
-            now - lastShot >= SHOT_COOLDOWN &&
-            bullets < MAX_BULLETS
-          ) {
-            firedThisHold = true;
-            lastShot = now;
-            bullets++;
-            fireSound.play().catch(() => {});
-            return true;
-          }
-
+      }
+      // ===== MAIN LOOP =====
+      function shotFired(onTarget) {
+        if (!laserSeen) {
+          laserHoldStart = 0;
+          laserWasSeenLastFrame = false;
           return false;
         }
 
-        function gotoNextTarget(now) {
-          currentTargetIndex++;
+        const now = performance.now();
 
-          if (currentTargetIndex >= activeTargets.length) {
-            // phase = 99; 
-            return;
-          }
-
-          const t = activeTargets[currentTargetIndex];
-          t.state = "ACTIVE";
-          t.start = now;
-          t.end = now + TARGET_TIME;
+        if (!laserSeen) {
+          laserHoldStart = 0;
+          laserWasSeenLastFrame = false;
+          firedThisHold = false;
+          return false;
         }
 
-        function handleHit(t) {
-          for (const target of activeTargets) {
-            if (!target.isActive()) continue;
-            if (laserJustAppeared) return;
-
-            const onTarget =
-              laserPos &&
-              target.hitTest(laserPos[0], laserPos[1], performance.now());
-
-
-            const fired = shotFired(onTarget);
-
-            if (fired && onTarget) {
-              target.hit = true;
-              target.state = "DONE";  
-              // target.active = false;
-              score++;
-
-              gotoNextTarget(performance.now());
-              return;
-            }
-          }
+        if (!laserWasSeenLastFrame) {
+          laserHoldStart = now;
+          laserWasSeenLastFrame = true;
+          firedThisHold = false;
+          return false;
         }
 
-        function loop() {
-          const now = performance.now();
+        if (!onTarget) {
+          laserHoldStart = now;
+          firedThisHold = false;
+          preHitPlayed = false;
+          return false;
+        }
 
-          ctx.fillStyle = "black";
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          for (const target of activeTargets) {
-            target.update(now);
-          }
+        if (
+          !firedThisHold &&
+          now - laserHoldStart >= HOLD_TO_FIRE &&
+          now - lastShot >= SHOT_COOLDOWN &&
+          bullets < MAX_BULLETS
+        ) {
+          preHitPlayed = true;
+          firedThisHold = true;
+          lastShot = now;
+          bullets++;
+          fireSound.play().catch(() => {});
+          return true;
+        }
 
-          if (!assetsReady) {
-            requestAnimationFrame(loop);
+        return false;
+      }
+
+      function gotoNextTarget(now) {
+        currentTargetIndex++;
+
+        if (currentTargetIndex >= activeTargets.length) {
+          return;
+        }
+
+        const prev = activeTargets[currentTargetIndex - 1];
+        const t = activeTargets[currentTargetIndex];
+
+        t.state = "WAITING";
+        t.start = now + HIT_DELAY;
+        t.end = t.start + TARGET_TIME;
+      }
+
+      function handleHit(now) {
+        for (const target of activeTargets) {
+          if (!target.isActive()) continue;
+          if (laserJustAppeared) return;
+
+          const onTarget =
+            laserPos && target.hitTest(laserPos[0], laserPos[1], now);
+
+          const fired = shotFired(onTarget);
+
+          if (fired && onTarget) {
+            target.hit = true;
+            target.state = "DONE";
+            score++;
+            gotoNextTarget(now);
             return;
           }
+        }
+      }
 
-          // vẽ bia
-          for (const target of activeTargets) {
-            const { dx, dy } = target.getOffset(now);
-            if (target.state === "ACTIVE") {
-              ctx.drawImage(
+      function loop() {
+        const now = performance.now();
+
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        for (const target of activeTargets) {
+          target.update(now);
+        }
+
+        if (!assetsReady) {
+          requestAnimationFrame(loop);
+          return;
+        }
+
+        // vẽ bia
+        for (const target of activeTargets) {
+          const { dx, dy } = target.getOffset(now);
+          if (target.state === "ACTIVE") {
+            ctx.drawImage(
               target.img,
               sx(target.x + dx),
               sy(target.y + dy),
               target.size * getScale(),
-              target.size * getScale()
+              target.size * getScale(),
             );
-            }
           }
-
-          // xử lý bắn
-          handleHit(now);
-          const t = now - roundStart;
-
-          // // reset tất cả
-          // activeTargets.forEach(tg => tg.active = false);
-
-          const current = activeTargets.find(tg => tg.state !== "DONE");
-
-          // timeline
-          // if (t < 15000) {
-          //   if (activeTargets[0].state !== "DONE")
-          //     activeTargets[0].state = "ACTIVE";
-          // }
-          // else if (t < 20000) {
-          //   if (activeTargets[1].state !== "DONE")
-          //     activeTargets[1].state = "ACTIVE";
-          // }
-          // else if (t < 30000) {
-          //   if (activeTargets[1].state !== "DONE")
-          //     activeTargets[1].state = "ACTIVE";
-          //   if (activeTargets[2].state !== "DONE")
-          //     activeTargets[2].state = "ACTIVE";
-          // }
-          // else if (t < 35000) {
-          //   if (activeTargets[2].state !== "DONE")
-          //     activeTargets[2].state = "ACTIVE";
-          // }
-          // else if (t < 50000) {
-          //   if (activeTargets[3].state !== "DONE")
-          //     activeTargets[3].state = "ACTIVE";
-          // }
-          // else {
-          //   phase = 99; // kết thúc round
-          // }
-
-          // hết bia?
-          const allDone = activeTargets.every(tg => tg.isDone());
-
-          if (allDone) {
-            if (round < MAX_ROUND) {
-              round++;
-              setupRound();
-            } else {
-              phase = 99;
-            }
-          }
-
-          // ===== AUDIO LOCK OVERLAY =====
-          if (!audioUnlocked) {
-            ctx.fillStyle = "rgba(0,0,0,0.7)";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            ctx.fillStyle = "yellow";
-            ctx.font = "600 28px Orbitron";
-            ctx.textAlign = "center";
-            ctx.fillText(
-              "NHAN PHIM BAT KY / CLICK CHUOT",
-              canvas.width / 2,
-              canvas.height / 2 - 10,
-            );
-
-            ctx.font = "18px Orbitron";
-            ctx.fillStyle = "white";
-            ctx.fillText(
-              "KICH HOAT HE THONG AM THANH",
-              canvas.width / 2,
-              canvas.height / 2 + 30,
-            );
-
-            lastLaserOn = laserNow;
-            requestAnimationFrame(loop);
-            return;
-          }
-
-              // ===== DRAW LASER (SCALE) =====
-              if(laserPos){
-              const lx = sx(laserPos[0]);
-              const ly = sy(laserPos[1]);
-
-              // vòng ngoài
-              ctx.strokeStyle = "rgba(255,255,0,0.8)";
-              ctx.lineWidth = 2;
-              ctx.beginPath();
-              ctx.arc(lx, ly, 10, 0, Math.PI*2);
-              ctx.stroke();
-
-              // tâm laser
-              ctx.fillStyle = "rgba(255,255,0,1)";
-              ctx.beginPath();
-              ctx.arc(lx, ly, 4, 0, Math.PI*2);
-              ctx.fill();
-
-              // glow
-              ctx.fillStyle = "rgba(255,255,0,0.25)";
-              ctx.beginPath();
-              ctx.arc(lx, ly, 18, 0, Math.PI*2);
-              ctx.fill();
-          }
-
-          // ===== RESULT =====
-          if (phase === 99) {
-            const rank =
-              score >= 4
-                ? "GIOI"
-                : score === 3
-                  ? "KHA"
-                  : score === 2
-                    ? "DAT"
-                    : "KHONG DAT";
-
-            ctx.fillStyle = "yellow";
-            ctx.font = "800 56px Orbitron";
-            ctx.textAlign = "center";
-            ctx.fillText("KET QUA BAN TAP", canvas.width / 2, 90);
-
-            ctx.font = "600 42px Orbitron";
-            ctx.fillText(rank, canvas.width / 2, 150);
-
-            const tableW = 620;
-            const rowH = 50;
-            const rows = [
-              ["ROUND", round.toString()],
-              ["SCORE", score.toString()],
-              ["SO DAN", `${bullets}/${MAX_BULLETS}`],
-              ["XEP LOAI", rank],
-            ];
-
-            const tableH = rowH * rows.length;
-            const tx = canvas.width / 2 - tableW / 2;
-            const ty = 180;
-
-            ctx.fillStyle = "#222";
-            ctx.fillRect(tx, ty, tableW, tableH);
-
-            ctx.strokeStyle = "yellow";
-            ctx.lineWidth = 3;
-            ctx.strokeRect(tx, ty, tableW, tableH);
-
-            ctx.font = "24px Orbitron";
-            ctx.textAlign = "left";
-
-            rows.forEach((r, i) => {
-              const y = ty + i * rowH;
-              ctx.fillStyle = "white";
-              ctx.fillText(r[0], tx + 20, y + 34);
-              ctx.fillStyle = "yellow";
-              ctx.fillText(r[1], tx + 340, y + 34);
-            });
-
-            ctx.fillStyle = "white";
-            ctx.font = "22px Orbitron";
-            ctx.textAlign = "center";
-            ctx.fillText("NHAN R DE RESET", canvas.width / 2, ty + tableH + 60);
-
-            if (!ttsPlayed && audioUnlocked) {
-              resultSounds[rank].play().catch(() => {});
-              ttsPlayed = true;
-            }
-          }
-
-          // ===== HUD =====
-          if (phase !== 99) {
-            hitEffect = null;
-
-            ctx.fillStyle = "rgba(0,0,0,0.45)";
-            ctx.fillRect(10, 10, 260, 110);
-
-            ctx.strokeStyle = "lime";
-            ctx.lineWidth = 2;
-            ctx.strokeRect(10, 10, 260, 110);
-
-            ctx.fillStyle = "lime";
-            ctx.font = "18px Orbitron";
-            ctx.textAlign = "left";
-
-            ctx.fillText(`ROUND`, 25, 40);
-            ctx.fillText(`SCORE`, 25, 70);
-            ctx.fillText(`AMMO`, 25, 100);
-
-            ctx.fillStyle = "yellow";
-            ctx.textAlign = "right";
-            ctx.fillText(round, 250, 40);
-            ctx.fillText(score, 250, 70);
-            ctx.fillText(`${bullets}/${MAX_BULLETS}`, 250, 100);
-          }
-
-          // if (phase !== 99 && laserOnTarget && laserHitPoint) {
-          //   const lx = sx(laserHitPoint[0]);
-          //   const ly = sy(laserHitPoint[1]);
-
-          //   // glow
-          //   ctx.fillStyle = "rgba(255,0,0,0.25)";
-          //   ctx.beginPath();
-          //   ctx.arc(lx, ly, 22, 0, Math.PI * 2);
-          //   ctx.fill();
-
-          //   // vòng
-          //   ctx.strokeStyle = "rgba(255,50,50,0.9)";
-          //   ctx.lineWidth = 2;
-          //   ctx.beginPath();
-          //   ctx.arc(lx, ly, 10, 0, Math.PI * 2);
-          //   ctx.stroke();
-
-          //   // tâm
-          //   ctx.fillStyle = "red";
-          //   ctx.beginPath();
-          //   ctx.arc(lx, ly, 4, 0, Math.PI * 2);
-          //   ctx.fill();
-          // }
-          lastLaserOn = laserNow;
-          requestAnimationFrame(loop);
         }
 
-        // ===== RESET =====
-        window.addEventListener("keydown", (e) => {
-          if (e.key === "r" && phase === 99) {
-            hitEffect = null;
-            score = bullets = 0;
-            round = 1;
-            phase = 0;
-            roundStart = performance.now(); 
-            setupRound();
-            lastShot = 0;
-            laserPrev = false;
-            ttsPlayed = false;
-          }
-        });
+        // xử lý bắn
+        handleHit(now);
+        const t = now - roundStart;
 
-        setupRound();
+        // // reset tất cả
+        // activeTargets.forEach(tg => tg.active = false);
+
+        const current = activeTargets.find((tg) => tg.state !== "DONE");
+
+        // timeline
+        // if (t < 15000) {
+        //   if (activeTargets[0].state !== "DONE")
+        //     activeTargets[0].state = "ACTIVE";
+        // }
+        // else if (t < 20000) {
+        //   if (activeTargets[1].state !== "DONE")
+        //     activeTargets[1].state = "ACTIVE";
+        // }
+        // else if (t < 30000) {
+        //   if (activeTargets[1].state !== "DONE")
+        //     activeTargets[1].state = "ACTIVE";
+        //   if (activeTargets[2].state !== "DONE")
+        //     activeTargets[2].state = "ACTIVE";
+        // }
+        // else if (t < 35000) {
+        //   if (activeTargets[2].state !== "DONE")
+        //     activeTargets[2].state = "ACTIVE";
+        // }
+        // else if (t < 50000) {
+        //   if (activeTargets[3].state !== "DONE")
+        //     activeTargets[3].state = "ACTIVE";
+        // }
+        // else {
+        //   phase = 99; // kết thúc round
+        // }
+
+        // hết bia?
+        const allDone = activeTargets.every((tg) => tg.isDone());
+
+        if (allDone) {
+          if (round < MAX_ROUND) {
+            round++;
+            setupRound();
+          } else {
+            phase = 99;
+          }
+        }
+
+        // ===== AUDIO LOCK OVERLAY =====
+        if (!audioUnlocked) {
+          ctx.fillStyle = "rgba(0,0,0,0.7)";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          ctx.fillStyle = "yellow";
+          ctx.font = "600 28px Orbitron";
+          ctx.textAlign = "center";
+          ctx.fillText(
+            "NHAN PHIM BAT KY / CLICK CHUOT",
+            canvas.width / 2,
+            canvas.height / 2 - 10,
+          );
+
+          ctx.font = "18px Orbitron";
+          ctx.fillStyle = "white";
+          ctx.fillText(
+            "KICH HOAT HE THONG AM THANH",
+            canvas.width / 2,
+            canvas.height / 2 + 30,
+          );
+
+          lastLaserOn = laserNow;
+          requestAnimationFrame(loop);
+          return;
+        }
+
+        // ===== DRAW LASER (SCALE) =====
+        // if (laserPos) {
+        //   const lx = sx(laserPos[0]);
+        //   const ly = sy(laserPos[1]);
+
+        //   // vòng ngoài
+        //   ctx.strokeStyle = "rgba(255,255,0,0.8)";
+        //   ctx.lineWidth = 2;
+        //   ctx.beginPath();
+        //   ctx.arc(lx, ly, 10, 0, Math.PI * 2);
+        //   ctx.stroke();
+
+        //   // tâm laser
+        //   ctx.fillStyle = "rgba(255,255,0,1)";
+        //   ctx.beginPath();
+        //   ctx.arc(lx, ly, 4, 0, Math.PI * 2);
+        //   ctx.fill();
+
+        //   // glow
+        //   ctx.fillStyle = "rgba(255,255,0,0.25)";
+        //   ctx.beginPath();
+        //   ctx.arc(lx, ly, 18, 0, Math.PI * 2);
+        //   ctx.fill();
+        // }
+
+        // ===== RESULT =====
+        if (phase === 99) {
+          const rank =
+            score >= 4
+              ? "GIOI"
+              : score === 3
+                ? "KHA"
+                : score === 2
+                  ? "DAT"
+                  : "KHONG DAT";
+
+          ctx.fillStyle = "yellow";
+          ctx.font = "800 56px Orbitron";
+          ctx.textAlign = "center";
+          ctx.fillText("KET QUA BAN TAP", canvas.width / 2, 90);
+
+          ctx.font = "600 42px Orbitron";
+          ctx.fillText(rank, canvas.width / 2, 150);
+
+          const tableW = 620;
+          const rowH = 50;
+          const rows = [
+            ["ROUND", round.toString()],
+            ["SCORE", score.toString()],
+            ["SO DAN", `${bullets}/${MAX_BULLETS}`],
+            ["XEP LOAI", rank],
+          ];
+
+          const tableH = rowH * rows.length;
+          const tx = canvas.width / 2 - tableW / 2;
+          const ty = 180;
+
+          ctx.fillStyle = "#222";
+          ctx.fillRect(tx, ty, tableW, tableH);
+
+          ctx.strokeStyle = "yellow";
+          ctx.lineWidth = 3;
+          ctx.strokeRect(tx, ty, tableW, tableH);
+
+          ctx.font = "24px Orbitron";
+          ctx.textAlign = "left";
+
+          rows.forEach((r, i) => {
+            const y = ty + i * rowH;
+            ctx.fillStyle = "white";
+            ctx.fillText(r[0], tx + 20, y + 34);
+            ctx.fillStyle = "yellow";
+            ctx.fillText(r[1], tx + 340, y + 34);
+          });
+
+          ctx.fillStyle = "white";
+          ctx.font = "22px Orbitron";
+          ctx.textAlign = "center";
+          ctx.fillText("NHAN R DE RESET", canvas.width / 2, ty + tableH + 60);
+
+          if (!ttsPlayed && audioUnlocked) {
+            resultSounds[rank].play().catch(() => {});
+            ttsPlayed = true;
+          }
+        }
+
+        // ===== HUD =====
+        if (phase !== 99) {
+          hitEffect = null;
+
+          ctx.fillStyle = "rgba(0,0,0,0.45)";
+          ctx.fillRect(10, 10, 260, 110);
+
+          ctx.strokeStyle = "lime";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(10, 10, 260, 110);
+
+          ctx.fillStyle = "lime";
+          ctx.font = "18px Orbitron";
+          ctx.textAlign = "left";
+
+          ctx.fillText(`ROUND`, 25, 40);
+          ctx.fillText(`SCORE`, 25, 70);
+          ctx.fillText(`AMMO`, 25, 100);
+
+          ctx.fillStyle = "yellow";
+          ctx.textAlign = "right";
+          ctx.fillText(round, 250, 40);
+          ctx.fillText(score, 250, 70);
+          ctx.fillText(`${bullets}/${MAX_BULLETS}`, 250, 100);
+        }
+
+        // if (phase !== 99 && laserOnTarget && laserHitPoint) {
+        //   const lx = sx(laserHitPoint[0]);
+        //   const ly = sy(laserHitPoint[1]);
+
+        //   // glow
+        //   ctx.fillStyle = "rgba(255,0,0,0.25)";
+        //   ctx.beginPath();
+        //   ctx.arc(lx, ly, 22, 0, Math.PI * 2);
+        //   ctx.fill();
+
+        //   // vòng
+        //   ctx.strokeStyle = "rgba(255,50,50,0.9)";
+        //   ctx.lineWidth = 2;
+        //   ctx.beginPath();
+        //   ctx.arc(lx, ly, 10, 0, Math.PI * 2);
+        //   ctx.stroke();
+
+        //   // tâm
+        //   ctx.fillStyle = "red";
+        //   ctx.beginPath();
+        //   ctx.arc(lx, ly, 4, 0, Math.PI * 2);
+        //   ctx.fill();
+        // }
+        lastLaserOn = laserNow;
         requestAnimationFrame(loop);
-      </script>
-    </body>
-  </html>
+      }
+
+      // ===== RESET =====
+      window.addEventListener("keydown", (e) => {
+        if (e.key === "r" && phase === 99) {
+          hitEffect = null;
+          score = bullets = 0;
+          round = 1;
+          phase = 0;
+          roundStart = performance.now();
+          setupRound();
+          lastShot = 0;
+          laserPrev = false;
+          ttsPlayed = false;
+        }
+      });
+
+      setupRound();
+      requestAnimationFrame(loop);
+    </script>
+  </body>
+</html>
